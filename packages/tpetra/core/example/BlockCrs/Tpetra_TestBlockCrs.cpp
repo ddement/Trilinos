@@ -47,8 +47,13 @@
 
 #include "Tpetra_TestBlockCrsMeshDatabase.hpp"
 
+#include "KokkosKernels_Handle.hpp"                     // for KokkosKernels...
+#include "KokkosSparse_spgemm.hpp"
+#include "KokkosSparse_BsrMatrix.hpp"
+
 #include <memory>
 #include <type_traits>
+#include <string>
 
 namespace { // (anonymous)
 
@@ -565,6 +570,106 @@ int main (int argc, char *argv[])
           TimeMonitor timerBlockCrsApply(*TimeMonitor::getNewTimer("5) BlockCrs Apply"));
           A_bcrs->apply(*X, *B_bcrs);
         }
+      }
+
+      // Matrix-Matrix product
+      if (commWorld->getSize() != 1) {
+
+        std::cout << "MM products not set up for multiple mpi ranks, skipping... " << std::endl;
+
+      } else {
+
+        using BcrsLocalMatDevType = tpetra_blockcrs_matrix_type::local_matrix_device_type;
+        using size_type = BcrsLocalMatDevType::size_type;
+        using ordinal_type = BcrsLocalMatDevType::ordinal_type;
+        using scalar_type = BcrsLocalMatDevType::value_type;
+        using device_type = BcrsLocalMatDevType::device_type;
+
+
+        RCP<tpetra_blockcrs_matrix_type> B_bcrs (new tpetra_blockcrs_matrix_type (*bcrs_graph,
+                                                                                  bcrs_values,
+                                                                                  blocksize,
+                                                                                  use_kokkos_kernels));
+
+        RCP<tpetra_blockcrs_matrix_type> C_bcrs (new tpetra_blockcrs_matrix_type (*bcrs_graph,
+                                                                                  bcrs_values,
+                                                                                  blocksize,
+                                                                                  use_kokkos_kernels));
+
+        const BcrsLocalMatDevType & Amat = A_bcrs->getLocalMatrixDevice();
+        const BcrsLocalMatDevType & Bmat = B_bcrs->getLocalMatrixDevice();
+
+        // KokkosKernelsHandle
+        typedef KokkosKernels::Experimental::KokkosKernelsHandle<
+            size_type,ordinal_type, scalar_type,
+            typename device_type::execution_space,
+            typename device_type::memory_space,
+            typename device_type::memory_space>
+            KernelHandle;
+
+        {
+          TimeMonitor timerSPGEMM_KK_MEMORY(*TimeMonitor::getNewTimer("SPGEMM_KK_MEMORY"));
+
+          BcrsLocalMatDevType Cmat;
+
+          std::string alg_name = std::string("SPGEMM_KK_MEMORY");
+          KokkosSparse::SPGEMMAlgorithm alg_enum = KokkosSparse::StringToSPGEMMAlgorithm(alg_name);
+
+          KernelHandle kh;
+          kh.create_spgemm_handle(alg_enum);
+          kh.set_team_work_size(16);
+
+          KokkosSparse::block_spgemm_symbolic(kh, Amat, false, Bmat, false, Cmat);
+          KokkosSparse::block_spgemm_numeric(kh, Amat, false, Bmat, false, Cmat);
+          kh.destroy_spgemm_handle();
+
+          double sum_of_values = 0;
+          for (int i=0; i<Cmat.values.extent(0); ++i) sum_of_values += Cmat.values(i);
+          std::cout << "SPGEMM_KK_MEMORY: " << sum_of_values << std::endl;
+        }
+
+        {
+          TimeMonitor timerSPGEMM_KK_DENSE(*TimeMonitor::getNewTimer("SPGEMM_KK_DENSE"));
+
+          BcrsLocalMatDevType Cmat;
+
+          std::string alg_name = std::string("SPGEMM_KK_DENSE");
+          KokkosSparse::SPGEMMAlgorithm alg_enum = KokkosSparse::StringToSPGEMMAlgorithm(alg_name);
+
+          KernelHandle kh;
+          kh.create_spgemm_handle(alg_enum);
+          kh.set_team_work_size(16);
+
+          KokkosSparse::block_spgemm_symbolic(kh, Amat, false, Bmat, false, Cmat);
+          KokkosSparse::block_spgemm_numeric(kh, Amat, false, Bmat, false, Cmat);
+          kh.destroy_spgemm_handle();
+
+          double sum_of_values = 0;
+          for (int i=0; i<Cmat.values.extent(0); ++i) sum_of_values += Cmat.values(i);
+          std::cout << "SPGEMM_KK_DENSE: " << sum_of_values << std::endl;
+        }
+
+        {
+          TimeMonitor timerSPGEMM_KK(*TimeMonitor::getNewTimer("SPGEMM_KK"));
+
+          BcrsLocalMatDevType Cmat;
+
+          std::string alg_name = std::string("SPGEMM_KK");
+          KokkosSparse::SPGEMMAlgorithm alg_enum = KokkosSparse::StringToSPGEMMAlgorithm(alg_name);
+
+          KernelHandle kh;
+          kh.create_spgemm_handle(alg_enum);
+          kh.set_team_work_size(16);
+
+          KokkosSparse::block_spgemm_symbolic(kh, Amat, false, Bmat, false, Cmat);
+          KokkosSparse::block_spgemm_numeric(kh, Amat, false, Bmat, false, Cmat);
+          kh.destroy_spgemm_handle();
+
+          double sum_of_values = 0;
+          for (int i=0; i<Cmat.values.extent(0); ++i) sum_of_values += Cmat.values(i);
+          std::cout << "SPGEMM_KK: " << sum_of_values << std::endl;
+        }
+
       }
 
       if (debug) {
