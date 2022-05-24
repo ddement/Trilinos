@@ -1,0 +1,3 @@
+packages.py is a modified version of the same file from ./spack-manager/repos/exawind/packages/nalu-wind/ to allow for hip_rdc
+
+builds.yaml is the halley file with the currently used spec

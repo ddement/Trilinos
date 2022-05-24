@@ -1,0 +1,5 @@
+current: rocmB
+builds:
+  release: nalu-wind ^trilinos+stk_unit_tests
+  cuda: nalu-wind+cuda cuda_arch=70 ^trilinos+cuda+stk_unit_tests
+  rocmB: nalu-wind+rocm amdgpu_target=gfx908 ^trilinos+rocm
